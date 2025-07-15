@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { Building2, Mail, Lock, LogIn, AlertCircle } from 'lucide-react'
+import { Building2, Mail, Lock, LogIn } from 'lucide-react'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -18,46 +18,53 @@ export default function LoginPage() {
     setError('')
 
     try {
-      // 1. Fazer login no Supabase Auth
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      console.log('🔄 Tentando login...')
+      
+      // 1. Login no Supabase Auth
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password: password.trim(),
       })
 
-      if (authError) throw authError
+      if (error) throw error
 
-      if (authData.user) {
-        // 2. Verificar se é usuário administrativo de alguma prefeitura
-        const { data: userData, error: userError } = await supabase
-          .rpc('get_current_user_data')
+      if (data.user) {
+        console.log('✅ Usuário autenticado:', data.user.email)
+        
+        // 2. Verificar se é admin autorizado
+        const { data: adminData, error: adminError } = await supabase
+          .from('usuarios_admin')
+          .select('nome, tipo_admin, ativo')
+          .eq('email', data.user.email)
+          .maybeSingle()
 
-        if (userError) {
-          console.error('Erro ao buscar dados do usuário:', userError)
-          throw new Error('Erro ao verificar permissões do usuário')
-        }
+        console.log('👤 Dados do admin:', adminData)
+        console.log('🔍 Erro admin (se houver):', adminError)
 
-        if (!userData || userData.length === 0) {
-          // Usuário não é admin de nenhuma prefeitura
+        if (adminError) {
+          console.log('❌ Erro na query:', adminError)
           await supabase.auth.signOut()
-          throw new Error('Acesso negado. Este usuário não tem permissão para acessar o painel administrativo.')
+          throw new Error(`Erro na verificação: ${adminError.message}`)
         }
 
-        // 3. Salvar dados do usuário no localStorage para uso no sistema
-        const userInfo = userData[0]
-        localStorage.setItem('user_prefeitura', JSON.stringify({
-          prefeitura_id: userInfo.prefeitura_id,
-          prefeitura_nome: userInfo.prefeitura_nome,
-          cidade: userInfo.cidade,
-          nome: userInfo.nome,
-          cargo: userInfo.cargo
-        }))
+        if (!adminData) {
+          console.log('❌ Usuário não é admin')
+          await supabase.auth.signOut()
+          throw new Error('Usuário não autorizado para este painel administrativo')
+        }
 
-        // 4. Redirecionar para dashboard
+        if (!adminData.ativo) {
+          console.log('❌ Usuário inativo')
+          await supabase.auth.signOut()
+          throw new Error('Usuário inativo. Contate o administrador.')
+        }
+
+        console.log(`✅ Login realizado: ${adminData.nome} (${adminData.tipo_admin})`)
         router.push('/dashboard')
       }
     } catch (error: any) {
-      console.error('Erro no login:', error)
-      setError(error.message || 'Erro ao fazer login')
+      console.error('❌ Erro no login:', error)
+      setError(error.message || 'Erro no login')
     } finally {
       setLoading(false)
     }
@@ -76,9 +83,6 @@ export default function LoginPage() {
           </h2>
           <p className="mt-2 text-sm text-gray-600">
             Painel Administrativo - Prefeituras
-          </p>
-          <p className="mt-1 text-xs text-gray-500">
-            Acesso restrito a administradores municipais
           </p>
         </div>
 
@@ -127,12 +131,8 @@ export default function LoginPage() {
           </div>
 
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm flex items-start gap-2">
-              <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-              <div>
-                <p className="font-medium">Erro de acesso:</p>
-                <p>{error}</p>
-              </div>
+            <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm">
+              {error}
             </div>
           )}
 
@@ -145,29 +145,15 @@ export default function LoginPage() {
               <span className="absolute left-0 inset-y-0 flex items-center pl-3">
                 <LogIn className="h-5 w-5 text-blue-500 group-hover:text-blue-400" />
               </span>
-              {loading ? 'Verificando acesso...' : 'Entrar no Painel'}
+              {loading ? 'Entrando...' : 'Entrar no Painel'}
             </button>
           </div>
         </form>
 
         {/* Footer */}
         <div className="text-center text-xs text-gray-500">
-          <p>Acesso para administradores de prefeituras cadastradas</p>
-          <p className="mt-1">Cada prefeitura visualiza apenas suas ocorrências</p>
+          <p>Acesso para administradores de prefeituras</p>
         </div>
-
-        {/* Informações de Teste */}
-        {process.env.NODE_ENV === 'development' && (
-          <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <h3 className="text-sm font-medium text-yellow-800 mb-2">🔧 Ambiente de Desenvolvimento</h3>
-            <div className="text-xs text-yellow-700 space-y-1">
-              <p><strong>Para testar:</strong></p>
-              <p>1. Crie usuários no Auth do Supabase</p>
-              <p>2. Execute a função SQL para criar perfil</p>
-              <p>3. Cada usuário verá apenas ocorrências da sua cidade</p>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )
